@@ -1,0 +1,5 @@
+#!/bin/bash
+wrapper=""
+if [ -n $(which ledit 2>/dev/null) ]; then wrapper=$(which ledit 2>/dev/null); fi
+if [ -n $(which rlwrap 2>/dev/null) ]; then wrapper="$(which rlwrap 2>/dev/null) -c"; fi
+$wrapper python ${0}.py "$@"

@@ -1,0 +1,12 @@
+-- 0.3 --
+little fix when passing options from multissh to multissh.py
+@list align columns
+count connected/disconn in @list
+@-- -> drop all disconnected
+more operations ignore disconnected hosts (caused python exceptions earlier)
+-x option for treating ranges as hex
+
+-- 0.2 --
+multissh is run with rlwrap or ledit if they are present on the system
+@list shows state (connected/disconnected)
+do not execute on inactive/missing session
