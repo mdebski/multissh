@@ -6,9 +6,10 @@ import sys
 import time
 import socket
 import select
-import paramiko
 import getpass
 import argparse
+import paramiko
+import threading
 import tty, termios
 
 import host
@@ -37,9 +38,10 @@ parser.add_argument('hosts', type=str, nargs='*', help='List of space separated 
 parser.add_argument('--file', '-f', help="""Read hosts from file. (one per line: "host user password")""")
 parser.add_argument('--command', '-c', help='Execute just this command and exit.')
 parser.add_argument('--debug', '-d', default="3", help='Debug level from 0 to 4 (highest)')
+parser.add_argument('--pool', '-p', default="20", help='Use up to that much threads for connecting and parallel execution.')
 parser.add_argument('--username', '-U', help='Username for all hosts')
 parser.add_argument('--password', '-P', help='Password for all hosts')
-parser.add_argument('--hex', '-x', default=False, action="store_true", help='Interprete ranges as hex numbers')
+parser.add_argument('--hex', '-x', default=False, action="store_true", help='Interpret ranges as hex numbers')
 args = parser.parse_args()
 
 debug.debugLevel=int(args.debug)
@@ -69,9 +71,34 @@ if(not hosts):
  debug.mesgErr("No host specified!")
  sys.exit(1)
 
-# Begining of doing something
+# Connecting paralelly.
 
-for h in hosts: h.connect()
+inPool=0
+mutex=threading.Lock()
+cEmpty=threading.Condition(mutex)
+cNotFull=threading.Condition(mutex)
+
+def threadWrapper(f):
+ global inPool
+ f()
+ mutex.acquire()
+ inPool-=1
+ if(inPool<args.pool): cNotFull.notify()
+ if(inPool==0): cEmpty.notify()
+ mutex.release()
+
+for h in hosts:
+ cNotFull.acquire()
+ while(inPool>=args.pool): cNotFull.wait()
+ inPool+=1
+ cNotFull.release()
+ threading.Thread(target=threadWrapper, args=(lambda: h.connect(),)).start()
+
+cEmpty.acquire()
+while(inPool != 0): cEmpty.wait()
+cEmpty.release()
+
+debug.mesgInfo("Finished connecting.")
 
 if(args.command): # Just single command
  host.allExecute(hosts, args.command) 
