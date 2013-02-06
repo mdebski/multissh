@@ -20,7 +20,7 @@ class Host:
  def connect(self):
   debug.mesgDebug("Connecting to %s... " % self.host)
   try:
-   self.session.connect(self.host, username=self.username, password=self.password)
+   self.session.connect(self.host, username=self.username, password=self.password, timeout=20)
    debug.mesgInfo("Connection to %s successful!" % self.host)
    self.status = 0
   except:  
