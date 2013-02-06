@@ -25,7 +25,8 @@ Entering an command starting with '@' may have special meaning:
 @-- 			drop all disconnected hosts
 @ID command		execute command only on host with specified ID
 @i 			enter interactive mode (CAUTION: get to know how it works first)
-@{} command		execute command substituting {ID} with id, {IP} with ip, {USER} with user, NOT substituting {PASS} with password :P
+@= command 		run command in parallel on many hosts
+@{} command		execute command substituting {ID} with id, {IP} with ip, {USER} with user
 @scp local remote	copy file to all hosts
 @n			exit interactive mode
 @@			input @
@@ -78,9 +79,23 @@ mutex=threading.Lock()
 cEmpty=threading.Condition(mutex)
 cNotFull=threading.Condition(mutex)
 
-def threadWrapper(f):
+# Did not work with one wrapper and passing function to it,
+# looked like some race conditions in threading.
+
+def threadConnectWrapper(h):
+ """wrapper for counting processes in pool."""
  global inPool
- f()
+ h.connect()
+ mutex.acquire()
+ inPool-=1
+ if(inPool<args.pool): cNotFull.notify()
+ if(inPool==0): cEmpty.notify()
+ mutex.release()
+
+def threadExecuteWrapper(h, cmd):
+ """wrapper for counting processes in pool."""
+ global inPool
+ h.execute(cmd)
  mutex.acquire()
  inPool-=1
  if(inPool<args.pool): cNotFull.notify()
@@ -92,16 +107,18 @@ for h in hosts:
  while(inPool>=args.pool): cNotFull.wait()
  inPool+=1
  cNotFull.release()
- threading.Thread(target=threadWrapper, args=(lambda: h.connect(),)).start()
+ threading.Thread(target=threadConnectWrapper, args=(h,)).start()
 
 cEmpty.acquire()
-while(inPool != 0): cEmpty.wait()
+while(inPool): cEmpty.wait()
 cEmpty.release()
 
 debug.mesgInfo("Finished connecting.")
 
 if(args.command): # Just single command
- host.allExecute(hosts, args.command) 
+ for h in hosts:
+  if(h.connected()): h.execute(command)
+ host.printHostsStatus(hosts)
  sys.exit(0)
 
 def startInteractive():
@@ -126,25 +143,24 @@ def stopInteractive():
 # Special interpretation
 
 def parseSpecial(spec):
- """Parses special command (string after @) and returns command or char to be used instead, or None if none"""
+ """Parses special command (string after @) and returns command or char to be used instead, or None if none and bool if command shall be run in parallel"""
  global hosts
  if(re.search("^(\?|help)\s*$",spec)): # @?, @help
   sys.stdout.write(str(specialHelp))
   sys.stdout.flush()
-  return None
- if(re.search("^@\s*$",spec)): return '@' # @@
+ if(re.search("^@\s*$",spec)): return ('@', False) # @@
  if(re.search("^n\s*$",spec)): # @n
   stopInteractive()
-  return None
- if(interactive): return spec
- if(re.search("^i\s*$",spec)): startInteractive() #i
+ if(interactive): return (spec,False)
+ if(re.search("^i\s*$",spec)): #@i
+  startInteractive()
  if(re.search("^list\s*$",spec)): # @list
   good, bad = 0,0
   for h in hosts:
-   print h
+   print(h)
    if(h.connected()): good+=1
    else: bad+=1
-  print "Connected: %d, disconnected: %d" % (good,bad)
+  print("Connected: %d, disconnected: %d" % (good,bad))
  m=re.search("^(-|drop )(\d+)\s*$",spec) # @-, @drop
  if(m):
   debug.mesgInfo("Dropping %d..." % int(m.group(2)))
@@ -164,19 +180,20 @@ def parseSpecial(spec):
      debug.mesgErr("Host %d FAILED." % h.id)
  m=re.search("^{} (.*)\s*$",spec) # @{}
  if(m):
-  good, bad = 0, 0
   for h in hosts:
    cmd=m.group(1)
    cmd=re.sub('{ID}', str(h.id), cmd)
    cmd=re.sub('{USER}', str(h.username), cmd)
    cmd=re.sub('{IP}', str(h.host), cmd)
-   if(h.connected() and h.execute(cmd)): good+=1
-   else: bad+=1
-  if(not bad): debug.mesgWarn("All %d hosts OK." % good)
-  else: debug.mesgErr("%d hosts OK, %d hosts failed." % (good,bad))
+   if(h.connected()): h.execute()
+  host.printHostsStatus(hosts)
  m=re.search("^scp (\S*) (\S*)\s*$",spec) # @scp
  if(m): debug.mesgErr("Not implemepted yet :(")
- return None
+ m=re.search("^= (.*)$",spec) # @=
+ if(m):
+  cmd=m.group(1)
+  return (cmd, True)
+ return (None, False)
 
 # Main loop
 
@@ -209,13 +226,33 @@ try:
       if(h.isInteractive()): h.channel.send(locchar)
   else:
    command=raw_input("multissh# ")
+   parallel=False
    if(re.search('^@', command)):
-    command=parseSpecial(command[1:])
+    (command, parallel)=parseSpecial(command[1:])
    if(command):
-    host.allExecute(hosts, command)
+    if(not parallel):
+     for h in hosts:
+      if(h.connected()): h.execute(command)
+    else:
+     inPool=0
+     mutex=threading.Lock()
+     cEmpty=threading.Condition(mutex)
+     cNotFull=threading.Condition(mutex)
+     for h in hosts:
+      if(not h.connected()): continue
+      cNotFull.acquire()
+      while(inPool>=args.pool): cNotFull.wait()
+      inPool+=1
+      cNotFull.release()
+      threading.Thread(target=threadExecuteWrapper, args=(h,command)).start()
+     cEmpty.acquire()
+     while(inPool): cEmpty.wait()
+     cEmpty.release()
+    host.printHostsStatus(hosts)
+
 except (KeyboardInterrupt, EOFError):
  if(interactive): stopInteractive()
  for h in hosts:
   h.disconnect()
- print ""
+ print("")
  sys.exit(1)

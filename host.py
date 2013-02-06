@@ -13,7 +13,8 @@ class Host:
   self.session = paramiko.SSHClient()
   self.session.set_missing_host_key_policy(paramiko.AutoAddPolicy())
   self.status = 1
-  self.channel = None # Use in interactive
+  self.channel = None # Used in interactive
+  self.lastOk = False
  def __str__(self):
   return "%s:	%s@%s	(%s)" % (self.id, self.username, self.host, "Connected" if self.connected() else "Disconnected")
  def connect(self):
@@ -38,7 +39,9 @@ class Host:
   for line in sshoutdata: debug.mesgWarn(line[:-1])
   if(len(ssherrdata) != 0): debug.mesgErr("Host %s error: " % self.host)
   for line in ssherrdata: debug.mesgErr(" "+line[:-1])
-  return (len(ssherrdata) == 0)
+  self.lastOk = not ssherrdata
+ def lastStatus(self):
+  return self.connected() and self.lastOk
  def isInteractive(self):
   return (self.channel and (not self.channel.closed))
  def interactiveStart(self):
@@ -47,12 +50,8 @@ class Host:
  def interactiveStop(self):
   self.channel = None
 
-def allExecute(hosts, cmd):
- """Execute single command an every connected host from hosts list"""
- good, bad = 0, 0
- for h in hosts:
-  if(h.connected() and h.execute(cmd)): good+=1
-  else: bad+=1
+def printHostsStatus(hosts):
+ good = len([h.lastStatus() for h in hosts if h.lastStatus()])
+ bad = len([h.lastStatus() for h in hosts if not h.lastStatus()])
  if(not bad): debug.mesgInfo("All %d hosts OK." % good)
  else: debug.mesgErr("%d hosts OK, %d hosts failed." % (good,bad))
-
