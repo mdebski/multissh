@@ -185,7 +185,7 @@ def parseSpecial(spec):
    cmd=re.sub('{ID}', str(h.id), cmd)
    cmd=re.sub('{USER}', str(h.username), cmd)
    cmd=re.sub('{IP}', str(h.host), cmd)
-   if(h.connected()): h.execute()
+   if(h.connected()): h.execute(cmd)
   host.printHostsStatus(hosts)
  m=re.search("^scp (\S*) (\S*)\s*$",spec) # @scp
  if(m): debug.mesgErr("Not implemepted yet :(")
